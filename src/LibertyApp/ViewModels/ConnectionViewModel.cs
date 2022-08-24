@@ -1,10 +1,11 @@
 ﻿using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using DotRas;
 using LibertyApp.Language;
 using LibertyApp.Models;
 using LibertyApp.Properties;
 using System;
-using System.Diagnostics;
+using System.IO;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using System.Windows.Input;
@@ -17,6 +18,13 @@ namespace LibertyApp.ViewModels;
 public class ConnectionViewModel : ObservableObject
 {
 	#region Fields
+
+	private static readonly RasDialer _dialer = new()
+	{
+		EntryName = Resources.ConnectionName,
+		PhoneBookPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), @"Microsoft\Network\Connections\Pbk\rasphone.pbk"),
+	};
+	private static readonly RasConnectionWatcher _watcher = new();
 
 	/// <summary>
 	/// Connection timer
@@ -96,12 +104,35 @@ public class ConnectionViewModel : ObservableObject
 
 	private bool _isConnected = false;
 
+	private RasConnection Connection
+	{
+		get => _connection;
+		set => SetProperty(ref _connection, value);
+	}
+	private RasConnection _connection;
+
 	#endregion
 
 	#region Constructors
 
 	public ConnectionViewModel()
 	{
+		_watcher.Disconnected += (_, _) =>
+		{
+			_dispatcherTimer.Stop();
+
+			Timer = TimeSpan.Zero;
+
+			IsConnected = false;
+
+			ShowDefaultAssets();
+
+			ConnectButtonText = Strings.ConnectText;
+			ConnectionState = Strings.StatusDisconnected;
+
+			App.Current.NotifyIcon.ShowBalloonTip(100, Strings.AppName, Strings.StatusDisconnected, ToolTipIcon.Info);
+		};
+
 		BackgroundImage = BackgroundImageStates[0];
 
 		ConnectionSpeed = new ConnectionSpeed();
@@ -131,6 +162,7 @@ public class ConnectionViewModel : ObservableObject
 	/// </summary>
 	public IAsyncRelayCommand ConnectCommandAsync { get; }
 
+
 	/// <summary>
 	/// Connection relay command handler
 	/// </summary>
@@ -138,22 +170,6 @@ public class ConnectionViewModel : ObservableObject
 	{
 		try
 		{
-			// prepare connection process
-			using var process = new Process
-			{
-				StartInfo = new ProcessStartInfo("cmd.exe")
-				{
-					WorkingDirectory = Environment.CurrentDirectory,
-					UseShellExecute = false,
-					CreateNoWindow = true,
-					ArgumentList =
-					{
-						"/c",
-						"rasdial",
-					},
-				},
-			};
-
 			// if connected already
 			if (IsConnected)
 			{
@@ -161,44 +177,21 @@ public class ConnectionViewModel : ObservableObject
 				ShowConnectingAssets();
 				ConnectButtonText = ConnectionState = Strings.DisconnectingText;
 
-				// argument to disconnect
-				process.StartInfo.ArgumentList.Add("/d");
+				await Connection.DisconnectAsync(System.Threading.CancellationToken.None);
+				//_watcher.Stop();
 
-				process.Start();
-				await process.WaitForExitAsync();
+				_dispatcherTimer.Stop();
 
-				// handle result
+				Timer = TimeSpan.Zero;
 
-				/* List of error codes for dial-up connections or VPN connections:
-					https://docs.microsoft.com/en-us/troubleshoot/windows-client/networking/error-codes-for-dial-up-vpn-connection */
+				IsConnected = false;
 
-				/* Routing and Remote Access Error Codes:
-					https://docs.microsoft.com/en-us/windows/win32/rras/routing-and-remote-access-error-codes */
+				ShowDefaultAssets();
 
-				switch (process.ExitCode)
-				{
-					// disconnect success
-					case 0:
-						// stop timer
-						_dispatcherTimer.Stop();
-						Timer = TimeSpan.Zero;
-						// change interface properties
-						IsConnected = false;
-						ShowDefaultAssets();
-						ConnectButtonText = Strings.ConnectText;
-						ConnectionState = Strings.StatusDisconnected;
-						App.Current.NotifyIcon.ShowBalloonTip(100, Strings.AppName, Strings.StatusDisconnected, ToolTipIcon.Info);
-						break;
+				ConnectButtonText = Strings.ConnectText;
+				ConnectionState = Strings.StatusDisconnected;
 
-					// handle any disconnecting errors
-					default:
-						App.Current.NotifyIcon.ShowBalloonTip(3000, Strings.ConnectionErrorCaption, process.ExitCode.ToString(), ToolTipIcon.Error);
-						// change interface properties
-						ShowDefaultAssets();
-						ConnectButtonText = Strings.ConnectText;
-						ConnectionState = Strings.StatusDisconnected;
-						break;
-				}
+				App.Current.NotifyIcon.ShowBalloonTip(100, Strings.AppName, Strings.StatusDisconnected, ToolTipIcon.Info);
 			}
 			// if not connected already
 			else
@@ -208,38 +201,19 @@ public class ConnectionViewModel : ObservableObject
 				ConnectButtonText = Strings.ConnectingText;
 				ConnectionState = Strings.StatusConnecting;
 
-				// arguments to establish a connection
-				process.StartInfo.ArgumentList.Add(Resources.ConnectionName);
+				Connection = await _dialer.ConnectAsync();
+				_watcher.Connection = Connection;
 
-				process.Start();
-				await process.WaitForExitAsync();
+				_startTime = DateTime.Now;
+				_dispatcherTimer.Start();
+				IsConnected = true;
+				ShowConnectedAssets();
+				ConnectButtonText = Strings.DisconnectText;
+				ConnectionState = Strings.StatusConnected;
 
-				// handle the connection result
-				switch (process.ExitCode)
-				{
-					// success
-					case 0:
-						// start timer
-						_startTime = DateTime.Now;
-						_dispatcherTimer.Start();
-						// change interface properties
-						IsConnected = true;
-						ShowConnectedAssets();
-						ConnectButtonText = Strings.DisconnectText;
-						ConnectionState = Strings.StatusConnected;
-						App.Current.NotifyIcon.ShowBalloonTip(100, Strings.AppName, Strings.StatusConnected,
-							ToolTipIcon.Info);
-						break;
+				App.Current.NotifyIcon.ShowBalloonTip(100, Strings.AppName, Strings.StatusConnected, ToolTipIcon.Info);
 
-					// any errors
-					default:
-						App.Current.NotifyIcon.ShowBalloonTip(3000, Strings.ConnectionErrorCaption, process.ExitCode.ToString(), ToolTipIcon.Error);
-						// change interface properties
-						ShowDefaultAssets();
-						ConnectButtonText = Strings.ConnectText;
-						ConnectionState = Strings.StatusDisconnected;
-						break;
-				}
+				_watcher.Start();
 			}
 		}
 		catch (Exception e)
