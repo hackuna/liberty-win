@@ -6,18 +6,17 @@
 [**English**](./README.md) | [**Русский**](./README-ru.md) 
 
 # FuckRKN1 VPN (Windows)
-VPN client for Windows from [**nezavisimost' Team**](https://github.com/nezavisimost).
+VPN приложение для Windows от [**nezavisimost' Team**](https://github.com/nezavisimost).
 
 <!--
-# Features
-
-# Technology
+# Функции
+# Стек
 -->
 
-# Design 
+# Дизайн
 ![image](https://user-images.githubusercontent.com/6414316/181246606-6b245c4a-99ec-4b1d-8f40-fdd82bdc1ae3.png)
 
 <!-- # Screencast -->
 
-# CONTRIBUTION
-[**Follow these instructions**](./CONTRIBUTION.md)
+# Помощь в разработке
+[**Следуйте этой инструкции**](./CONTRIBUTION-ru.md)
